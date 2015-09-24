@@ -34,175 +34,144 @@ sslverification = True
 
 # idpentryurl: The initial url that starts the authentication process.
 idpentryurl = 'https://nimbusscale.okta.com/home/amazon_aws/0oa1zacnfpCCu09Uc0x7/272'
-#idpentryurl = 'https://<fqdn>:<port>/idp/profile/SAML2/Unsolicited/SSO?providerId=urn:amazon:webservices'
 
 # Uncomment to enable low level debugging
 #logging.basicConfig(level=logging.DEBUG)
 
 ##########################################################################
 
-# Get the federated credentials from the user
-print "Username:",
-username = raw_input()
-password = getpass.getpass()
-print ''
+def okta_login(username,password,idpentryurl,sslverification):
+    """Parses the idpentryurl and performs a login with the creds 
+    provided by the user. Returns a requests.Response object"""
+    # Initiate session handler
+    session = requests.Session()
+    # Programmatically get the SAML assertion
+    # Opens the initial IdP url and follows all of the HTTP302 redirects, and
+    # gets the resulting login page
+    formresponse = session.get(idpentryurl, verify=sslverification)
+    # Capture the idpauthformsubmiturl, 
+    # which is the final url after all the 302s
+    idpauthformsubmiturl = formresponse.url
+    # Parse the response and extract all the necessary values
+    # in order to build a dictionary of all of the form values the IdP expects
+    formsoup = BeautifulSoup(formresponse.text.decode('utf8'), "html5lib")
+    payload = {}
+    for inputtag in formsoup.find_all(re.compile('(INPUT|input)')):
+        name = inputtag.get('name','')
+        value = inputtag.get('value','')
+        if "user" in name.lower():
+            payload[name] = username
+        elif "pass" in name.lower():
+            payload[name] = password
+        else:
+            #Simply populate the parameter with the existing value
+            #(picks up hidden fields in the login form)
+            payload[name] = value
+    # build the idpauthformsubmiturl by combining the scheme and hostname
+    # from the entry url with the form action target
+    for inputtag in formsoup.find_all(re.compile('(FORM|form)')):
+        action = inputtag.get('action')
+        if action:
+            parsedurl = urlparse(idpentryurl)
+            idpauthformsubmiturl = "{scheme}://{netloc}{action}".format(
+                                                scheme=parsedurl.scheme,
+                                                netloc=parsedurl.netloc,
+                                                action=action)
+    # Performs the submission of the IdP login form with the above post data
+    response = session.post(
+        idpauthformsubmiturl, params=payload, verify=sslverification)
+    return response
 
-# Initiate session handler
-session = requests.Session()
-
-# Programmatically get the SAML assertion
-# Opens the initial IdP url and follows all of the HTTP302 redirects, and
-# gets the resulting login page
-formresponse = session.get(idpentryurl, verify=sslverification)
-# Capture the idpauthformsubmiturl, which is the final url after all the 302s
-idpauthformsubmiturl = formresponse.url
-
-# Parse the response and extract all the necessary values
-# in order to build a dictionary of all of the form values the IdP expects
-formsoup = BeautifulSoup(formresponse.text.decode('utf8'), "html5lib")
-payload = {}
-
-for inputtag in formsoup.find_all(re.compile('(INPUT|input)')):
-    name = inputtag.get('name','')
-    value = inputtag.get('value','')
-    if "user" in name.lower():
-        #Make an educated guess that this is the right field for the username
-        payload[name] = username
-    elif "email" in name.lower():
-        #Some IdPs also label the username field as 'email'
-        payload[name] = username
-    elif "pass" in name.lower():
-        #Make an educated guess that this is the right field for the password
-        payload[name] = password
-    else:
-        #Simply populate the parameter with the existing value (picks up hidden fields in the login form)
-        payload[name] = value
-
-# Debug the parameter payload if needed
-# Use with caution since this will print sensitive output to the screen
-#print payload
-
-# Some IdPs don't explicitly set a form action, but if one is set we should
-# build the idpauthformsubmiturl by combining the scheme and hostname 
-# from the entry url with the form action target
-# If the action tag doesn't exist, we just stick with the 
-# idpauthformsubmiturl above
-for inputtag in formsoup.find_all(re.compile('(FORM|form)')):
-    action = inputtag.get('action')
-    if action:
-        parsedurl = urlparse(idpentryurl)
-        idpauthformsubmiturl = parsedurl.scheme + "://" + parsedurl.netloc + action
-
-# Performs the submission of the IdP login form with the above post data
-response = session.post(
-    idpauthformsubmiturl, params=payload, verify=sslverification)
-
-# Debug the response if needed
-#print (response.text)
-
-# Overwrite and delete the credential variables, just for safety
-username = '##############################################'
-password = '##############################################'
-del username
-del password
-
-# Decode the response and extract the SAML assertion
-soup = BeautifulSoup(response.text.decode('utf8'), "html5lib")
-assertion = ''
-
-# Look for the SAMLResponse attribute of the input tag (determined by
-# analyzing the debug print lines above)
-for inputtag in soup.find_all('input'):
-    if(inputtag.get('name') == 'SAMLResponse'):
-        #print(inputtag.get('value'))
-        assertion = inputtag.get('value')
-
-# Better error handling is required for production use.
-if (assertion == ''):
-    #TODO: Insert valid error checking/handling
-    print 'Response did not contain a valid SAML assertion'
-    sys.exit(0)
-
-# Debug only
-# print(base64.b64decode(assertion))
-
-# Parse the returned assertion and extract the authorized roles
-awsroles = []
-root = ET.fromstring(base64.b64decode(assertion))
-for saml2attribute in root.iter('{urn:oasis:names:tc:SAML:2.0:assertion}Attribute'):
-    if (saml2attribute.get('Name') == 'https://aws.amazon.com/SAML/Attributes/Role'):
-        for saml2attributevalue in saml2attribute.iter('{urn:oasis:names:tc:SAML:2.0:assertion}AttributeValue'):
-            awsroles.append(saml2attributevalue.text)
-
-# Note the format of the attribute value should be role_arn,principal_arn
-# but lots of blogs list it as principal_arn,role_arn so let's reverse
-# them if needed
-for awsrole in awsroles:
-    chunks = awsrole.split(',')
-    if'saml-provider' in chunks[0]:
-        newawsrole = chunks[1] + ',' + chunks[0]
-        index = awsroles.index(awsrole)
-        awsroles.insert(index, newawsrole)
-        awsroles.remove(awsrole)
-
-# If I have more than one role, ask the user which one they want,
-# otherwise just proceed
-print ""
-if len(awsroles) > 1:
-    i = 0
-    print "Please choose the role you would like to assume:"
-    for awsrole in awsroles:
-        print '[', i, ']: ', awsrole.split(',')[0]
-        i += 1
-    print "Selection: ",
-    selectedroleindex = raw_input()
-
-    # Basic sanity check of input
-    if int(selectedroleindex) > (len(awsroles) - 1):
-        print 'You selected an invalid role index, please try again'
+def get_saml_assertion(response):
+    """Parses a requests.Response object that contains a SAML assertion.
+    Returns an base64 encoded SAML Assertion"""
+   # Decode the requests.Response object and extract the SAML assertion
+    soup = BeautifulSoup(response.text.decode('utf8'), "html5lib")
+    assertion = ''
+    # Look for the SAMLResponse attribute of the input tag (determined by
+    # analyzing the debug print lines above)
+    for inputtag in soup.find_all('input'):
+        if(inputtag.get('name') == 'SAMLResponse'):
+            #print(inputtag.get('value'))
+            assertion = inputtag.get('value')
+    # Better error handling is required for production use.
+    if (assertion == ''):
+        print 'Response did not contain a valid SAML assertion'
         sys.exit(0)
+    return assertion
 
-    role_arn = awsroles[int(selectedroleindex)].split(',')[0]
-    principal_arn = awsroles[int(selectedroleindex)].split(',')[1]
-else:
-    role_arn = awsroles[0].split(',')[0]
-    principal_arn = awsroles[0].split(',')[1]
+def get_arns_from_assertion(assertion):
+    """Parses a base64 encoded SAML Assertion and extracts the role and 
+    principle ARNs to be used when making a request to STS.
+    Returns a dict with RoleArn, PrincipalArn & SAMLAssertion that can be 
+    used to call assume_role_with_saml"""
+    # Parse the returned assertion and extract the principle and role ARNs
+    root = ET.fromstring(base64.b64decode(assertion))
+    urn = "{urn:oasis:names:tc:SAML:2.0:assertion}"
+    urn_attribute = urn + "Attribute"
+    urn_attributevalue = urn + "AttributeValue"
+    role_url = "https://aws.amazon.com/SAML/Attributes/Role"
+    for saml2attribute in root.iter(urn_attribute):
+        if (saml2attribute.get('Name') == role_url):
+            for saml2attributevalue in saml2attribute.iter(urn_attributevalue):
+                arns = saml2attributevalue.text
+    # Create dict to be used to call assume_role_with_saml
+    arn_dict = {}
+    arn_dict['RoleArn'] = arns.split(',')[1]
+    arn_dict['PrincipalArn'] = arns.split(',')[0]
+    arn_dict['SAMLAssertion'] = assertion
+    return arn_dict
 
-# Use the assertion to get an AWS STS token using Assume Role with SAML
-sts_client = boto3.client('sts')
-response = sts_client.assume_role_with_saml(RoleArn=role_arn, 
-                                         PrincipalArn=principal_arn, 
-                                         SAMLAssertion=assertion)
-creds = response['Credentials']
+def get_sts_token(RoleArn,PrincipalArn,SAMLAssertion):
+    """Use the assertion to get an AWS STS token using Assume Role with SAML
+    returns a Credentials dict with the keys and token"""
+    sts_client = boto3.client('sts')
+    response = sts_client.assume_role_with_saml(RoleArn=RoleArn,
+                                                PrincipalArn=PrincipalArn,
+                                                SAMLAssertion=SAMLAssertion)
+    Credentials = response['Credentials']
+    return Credentials
 
+def write_aws_creds(configfile,access_key,secret_key,token,region,output):
+    """ Writes the AWS STS token into the AWS credential file"""
+    home = expanduser("~")
+    filename = home + configfile
+    # Read in the existing config file
+    config = ConfigParser.RawConfigParser()
+    config.read(filename)
+    # Put the credentials into a saml specific section instead of clobbering
+    # the default credentials
+    if not config.has_section('saml'):
+        config.add_section('saml')
+    config.set('saml', 'output', output)
+    config.set('saml', 'region', region)
+    config.set('saml', 'aws_access_key_id', access_key)
+    config.set('saml', 'aws_secret_access_key', secret_key)
+    config.set('saml', 'aws_session_token', token)
+    # Write the updated config file
+    with open(filename, 'w+') as configfile:
+        config.write(configfile)
+    
+def main():
+    # Get the federated credentials from the user
+    print "Username:",
+    username = raw_input()
+    password = getpass.getpass()
+    print ''
 
-# Write the AWS STS token into the AWS credential file
-home = expanduser("~")
-filename = home + awsconfigfile
+    response = okta_login(username,password,idpentryurl,sslverification)
+    assertion = get_saml_assertion(response)
+    saml_dict = get_arns_from_assertion(assertion) 
+    creds = get_sts_token(saml_dict['RoleArn'],
+                          saml_dict['PrincipalArn'],
+                          saml_dict['SAMLAssertion'])
+    write_aws_creds(awsconfigfile,
+                    creds['AccessKeyId'],
+                    creds['SecretAccessKey'],
+                    creds['SessionToken'],
+                    region,
+                    outputformat)
 
-# Read in the existing config file
-config = ConfigParser.RawConfigParser()
-config.read(filename)
+if __name__ == '__main__':
+    main()
 
-# Put the credentials into a saml specific section instead of clobbering
-# the default credentials
-if not config.has_section('saml'):
-    config.add_section('saml')
-
-config.set('saml', 'output', outputformat)
-config.set('saml', 'region', region)
-config.set('saml', 'aws_access_key_id', creds['AccessKeyId'])
-config.set('saml', 'aws_secret_access_key', creds['SecretAccessKey'])
-config.set('saml', 'aws_session_token', creds['SessionToken'])
-
-# Write the updated config file
-with open(filename, 'w+') as configfile:
-    config.write(configfile)
-
-# Give the user some basic info as to what has just happened
-print '\n\n----------------------------------------------------------------'
-print 'Your new access key pair has been stored in the AWS configuration file {0} under the saml profile.'.format(filename)
-print 'Note that it will expire at {0}.'.format(creds['Expiration'])
-print 'After this time, you may safely rerun this script to refresh your access key pair.'
-print 'To use this credential, call the AWS CLI with the --profile option (e.g. aws --profile saml ec2 describe-instances).'
-print '----------------------------------------------------------------\n\n'
