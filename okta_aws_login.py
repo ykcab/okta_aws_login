@@ -1,17 +1,43 @@
 #!/usr/bin/python
-
-import sys
-import boto3
-import requests
-import getpass
-import ConfigParser
+import argparse
 import base64
+import ConfigParser
+import getpass
 import logging
-import xml.etree.ElementTree as ET
+import os
 import re
-from bs4 import BeautifulSoup
+import requests
+import sys
+import xml.etree.ElementTree as ET
 from os.path import expanduser
 from urlparse import urlparse, urlunparse
+
+import boto3
+from bs4 import BeautifulSoup
+
+##########################################################################
+# Args
+
+parser = argparse.ArgumentParser(
+    description = "Gets a STS token to use for aws CLI based"
+                  " on a SAML assertion from Okta")
+parser.add_argument(
+    '--username',
+    help = "The username to use when logging into Okta. The username can \
+            also be set via the OKTA_USERNAME env variable. If not provided \
+            you will be prompted to enter a username."
+)
+
+parser.add_argument(
+    '--profile',
+    help = "The name of the profile to use when storing the credentials in \
+            the AWS credentials file. If not provided then the name of \
+            the role assumed will be used as the profile name"
+)
+
+args = parser.parse_args()
+
+##########################################################################
 
 ##########################################################################
 # Variables
@@ -34,9 +60,6 @@ sslverification = True
 
 # idpentryurl: The initial url that starts the authentication process.
 idpentryurl = 'https://nimbusscale.okta.com/home/amazon_aws/0oa1zacnfpCCu09Uc0x7/272'
-
-# Uncomment to enable low level debugging
-#logging.basicConfig(level=logging.DEBUG)
 
 ##########################################################################
 
@@ -132,7 +155,8 @@ def get_sts_token(RoleArn,PrincipalArn,SAMLAssertion):
     Credentials = response['Credentials']
     return Credentials
 
-def write_aws_creds(configfile,access_key,secret_key,token,region,output):
+def write_aws_creds(configfile,profile,access_key,secret_key,token,
+                    region,output):
     """ Writes the AWS STS token into the AWS credential file"""
     home = expanduser("~")
     filename = home + configfile
@@ -141,23 +165,37 @@ def write_aws_creds(configfile,access_key,secret_key,token,region,output):
     config.read(filename)
     # Put the credentials into a saml specific section instead of clobbering
     # the default credentials
-    if not config.has_section('saml'):
-        config.add_section('saml')
-    config.set('saml', 'output', output)
-    config.set('saml', 'region', region)
-    config.set('saml', 'aws_access_key_id', access_key)
-    config.set('saml', 'aws_secret_access_key', secret_key)
-    config.set('saml', 'aws_session_token', token)
+    if not config.has_section(profile):
+        config.add_section(profile)
+    config.set(profile, 'output', output)
+    config.set(profile, 'region', region)
+    config.set(profile, 'aws_access_key_id', access_key)
+    config.set(profile, 'aws_secret_access_key', secret_key)
+    config.set(profile, 'aws_session_token', token)
     # Write the updated config file
     with open(filename, 'w+') as configfile:
         config.write(configfile)
     
 def main():
-    # Get the federated credentials from the user
-    print "Username:",
-    username = raw_input()
-    password = getpass.getpass()
-    print ''
+    # Get the federated credentials for the user
+    # Check to see if the username arg has been set, if so use that
+    if args.username is not None:
+        username = args.username
+    # Next check to see if the OKTA_USERNAME env var is set
+    elif os.environ.get("OKTA_USERNAME") is not None:
+        username = os.environ.get("OKTA_USERNAME")
+    # Otherwise just ask the user
+    else:    
+        print "Username:",
+        username = raw_input()
+    
+    # Set prompt to include the user name, since username could be set
+    # via OKTA_USERNAME env and user might not remember.
+    passwd_prompt = "Password for {}: ".format(username)
+    password = getpass.getpass(prompt=passwd_prompt)
+    if len(password) == 0:
+        print( "Password must be provided")
+        sys.exit(1)
 
     response = okta_login(username,password,idpentryurl,sslverification)
     assertion = get_saml_assertion(response)
@@ -165,7 +203,15 @@ def main():
     creds = get_sts_token(saml_dict['RoleArn'],
                           saml_dict['PrincipalArn'],
                           saml_dict['SAMLAssertion'])
+    # Get role name to use for the name of the profile
+    # check if profile arg has been set
+    if args.profile is not None:
+        profile_name = args.profile
+    # otherwise just set it to the name of the role 
+    else:
+        profile_name = saml_dict['RoleArn'].split('/')[1]
     write_aws_creds(awsconfigfile,
+                    profile_name,
                     creds['AccessKeyId'],
                     creds['SecretAccessKey'],
                     creds['SessionToken'],
