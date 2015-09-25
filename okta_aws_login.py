@@ -1,18 +1,20 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 import argparse
 import base64
-import ConfigParser
+import configparser
 import getpass
 import logging
+import math
 import os
 import re
-import requests
 import sys
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone, timedelta
 from os.path import expanduser
-from urlparse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse
 
 import boto3
+import requests
 from bs4 import BeautifulSoup
 
 ##########################################################################
@@ -22,18 +24,25 @@ parser = argparse.ArgumentParser(
     description = "Gets a STS token to use for aws CLI based"
                   " on a SAML assertion from Okta")
 parser.add_argument(
-    '--username',
+    '--username', '-u',
     help = "The username to use when logging into Okta. The username can \
             also be set via the OKTA_USERNAME env variable. If not provided \
             you will be prompted to enter a username."
 )
 
 parser.add_argument(
-    '--profile',
+    '--profile', '-p',
     help = "The name of the profile to use when storing the credentials in \
             the AWS credentials file. If not provided then the name of \
             the role assumed will be used as the profile name"
 )
+
+parser.add_argument(
+    '--verbose', '-v',
+    action = 'store_true',
+    help = "If set will print a message about the creds that were set"
+)
+
 
 args = parser.parse_args()
 
@@ -77,7 +86,7 @@ def okta_login(username,password,idpentryurl,sslverification):
     idpauthformsubmiturl = formresponse.url
     # Parse the response and extract all the necessary values
     # in order to build a dictionary of all of the form values the IdP expects
-    formsoup = BeautifulSoup(formresponse.text.decode('utf8'), "html5lib")
+    formsoup = BeautifulSoup(formresponse.text, "html.parser")
     payload = {}
     for inputtag in formsoup.find_all(re.compile('(INPUT|input)')):
         name = inputtag.get('name','')
@@ -109,7 +118,7 @@ def get_saml_assertion(response):
     """Parses a requests.Response object that contains a SAML assertion.
     Returns an base64 encoded SAML Assertion"""
    # Decode the requests.Response object and extract the SAML assertion
-    soup = BeautifulSoup(response.text.decode('utf8'), "html5lib")
+    soup = BeautifulSoup(response.text, "html.parser")
     assertion = ''
     # Look for the SAMLResponse attribute of the input tag (determined by
     # analyzing the debug print lines above)
@@ -119,7 +128,7 @@ def get_saml_assertion(response):
             assertion = inputtag.get('value')
     # Better error handling is required for production use.
     if (assertion == ''):
-        print 'Response did not contain a valid SAML assertion'
+        print("Response did not contain a valid SAML assertion")
         sys.exit(0)
     return assertion
 
@@ -161,7 +170,7 @@ def write_aws_creds(configfile,profile,access_key,secret_key,token,
     home = expanduser("~")
     filename = home + configfile
     # Read in the existing config file
-    config = ConfigParser.RawConfigParser()
+    config = configparser.RawConfigParser()
     config.read(filename)
     # Put the credentials into a saml specific section instead of clobbering
     # the default credentials
@@ -186,7 +195,7 @@ def main():
         username = os.environ.get("OKTA_USERNAME")
     # Otherwise just ask the user
     else:    
-        print "Username:",
+        print("Username: ")
         username = raw_input()
     
     # Set prompt to include the user name, since username could be set
@@ -217,6 +226,16 @@ def main():
                     creds['SessionToken'],
                     region,
                     outputformat)
+
+    # Print message about creds if verbose is set
+    if args.verbose == True:
+        now = datetime.now(timezone.utc)
+        valid_duration = creds['Expiration'] - now
+        valid_minutes = math.ceil(valid_duration / timedelta(minutes=1)) 
+        cred_details = ("Credentials for the profile {} have been set. "
+                        "They will expire in {} minutes.".format(profile_name,
+                        valid_minutes)) 
+        print(cred_details)
 
 if __name__ == '__main__':
     main()
