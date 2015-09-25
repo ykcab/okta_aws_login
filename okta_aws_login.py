@@ -63,16 +63,12 @@ outputformat = 'json'
 # credentials under the saml profile
 awsconfigfile = '/.aws/credentials'
 
-# SSL certificate verification: Whether or not strict certificate
-# verification is done, False should only be used for dev/test
-sslverification = True
-
 # idpentryurl: The initial url that starts the authentication process.
 idpentryurl = 'https://nimbusscale.okta.com/home/amazon_aws/0oa1zacnfpCCu09Uc0x7/272'
 
 ##########################################################################
 
-def okta_login(username,password,idpentryurl,sslverification):
+def okta_login(username,password,idpentryurl):
     """Parses the idpentryurl and performs a login with the creds 
     provided by the user. Returns a requests.Response object"""
     # Initiate session handler
@@ -80,7 +76,7 @@ def okta_login(username,password,idpentryurl,sslverification):
     # Programmatically get the SAML assertion
     # Opens the initial IdP url and follows all of the HTTP302 redirects, and
     # gets the resulting login page
-    formresponse = session.get(idpentryurl, verify=sslverification)
+    formresponse = session.get(idpentryurl, verify=True)
     # Capture the idpauthformsubmiturl, 
     # which is the final url after all the 302s
     idpauthformsubmiturl = formresponse.url
@@ -111,7 +107,11 @@ def okta_login(username,password,idpentryurl,sslverification):
                                                 action=action)
     # Performs the submission of the IdP login form with the above post data
     response = session.post(
-        idpauthformsubmiturl, params=payload, verify=sslverification)
+        idpauthformsubmiturl, params=payload, verify=True)
+    # Check to see if the sign in failed, if so notify user and exit
+    if "Sign in failed!" in response.text:
+        print("Sign in failed!")
+        sys.exit(1)
     return response
 
 def get_saml_assertion(response):
@@ -124,12 +124,11 @@ def get_saml_assertion(response):
     # analyzing the debug print lines above)
     for inputtag in soup.find_all('input'):
         if(inputtag.get('name') == 'SAMLResponse'):
-            #print(inputtag.get('value'))
             assertion = inputtag.get('value')
     # Better error handling is required for production use.
     if (assertion == ''):
         print("Response did not contain a valid SAML assertion")
-        sys.exit(0)
+        sys.exit(1)
     return assertion
 
 def get_arns_from_assertion(assertion):
@@ -206,7 +205,7 @@ def main():
         print( "Password must be provided")
         sys.exit(1)
 
-    response = okta_login(username,password,idpentryurl,sslverification)
+    response = okta_login(username,password,idpentryurl)
     assertion = get_saml_assertion(response)
     saml_dict = get_arns_from_assertion(assertion) 
     creds = get_sts_token(saml_dict['RoleArn'],
