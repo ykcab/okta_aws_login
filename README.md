@@ -16,8 +16,11 @@ The okta_aws_login tool will prompt the user for the necissary credentials neede
 # Configuration
 Configuration for okta_aws_login is done via variables set within the module. There is one variable that must be changed and a few others that you may want to change.  
 
-idp_entry_url - You must enter the URL for the AWS app within Okta that is configured to provide access to AWS with the desired role.
+* idp_entry_url - You must enter the URL for the AWS app within Okta that is configured to provide access to AWS with the desired role.
 
-cred_profile - By default the okta_aws_login tool writes the credentials to a profile within the aws credentials file that matches the name of the AWS role assumed with the credentials. This can be changed from "role" to "default" which will cause the okta_aws_login tool to write the credentials to the default profile. Writing the default profile will often be the desired behavior, but is not the default behavior as it prevents any unexpected overwriting of the default profile credentials. 
+* cred_profile - By default the okta_aws_login tool writes the credentials to a profile within the aws credentials file that matches the name of the AWS role assumed with the credentials. This can be changed from "role" to "default" which will cause the okta_aws_login tool to write the credentials to the default profile. Writing the default profile will often be the desired behavior, but is not the default behavior as it prevents any unexpected overwriting of the default profile credentials. 
 
-region and output_format - These will define the region and output for the profile written to the aws credentials file. They default to "us-west-2" and "json". Change them to suit your needs.
+* region and output_format - These will define the region and output for the profile written to the aws credentials file. They default to "us-west-2" and "json". Change them to suit your needs.
+
+
+
