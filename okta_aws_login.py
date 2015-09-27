@@ -94,15 +94,54 @@ def okta_password_login(username,password,idp_entry_url):
     # Performs the submission of the IdP login form with the above post data
     response = session.post(
         idpauthformsubmiturl, params=payload, verify=True)
-    # Check to see if the sign in failed, if so notify user and exit
+    # Check the response to see if the login was successful or 
+    # if MFA login is needed
     if "Sign in failed!" in response.text:
         print("Sign in failed!")
         sys.exit(1)
+    elif "Enter your Okta Verify code" in response.text:
+        response = okta_verify_mfa_login(response)
     # construct dict to return
     response_dict = {}
     response_dict['response'] = response
     response_dict['sid'] = response.cookies['sid']
     return response_dict
+
+def okta_verify_mfa_login(password_login_response):
+    """ Prompt user for Okta Verify MFA token and construcuts MFA login request
+    from entered passcode and details extracted from provided requests.Response
+    object. Returns a requests.Response object of the response after login"""
+    # Initiate session handler
+    session = requests.Session()
+    soup = BeautifulSoup(password_login_response.text, "html.parser")
+    cookie_dict = {}
+    cookie_dict['sid'] = password_login_response.cookies['sid']
+    headers_dict = {}
+    headers_dict['referer'] = password_login_response.url
+    payload_dict = {}
+    # Look for the _xsrfToken which we POST along with the passcode
+    for inputtag in soup.find_all('input'):
+        if(inputtag.get('name') == '_xsrfToken'):
+            xsrfToken = inputtag.get('value')
+    payload_dict['_xsrfToken'] = xsrfToken
+    headers_dict['X-Okta-Xsrftoken'] = xsrfToken
+    # build idpmfaformsubmiturl where the login info will be POSTed
+    for inputtag in soup.find_all(re.compile('(FORM|form)')):
+       action = inputtag.get('action')
+    idpmfaformsubmiturl = "https://{}{}".format(
+                           urlparse(password_login_response.url).netloc
+                           ,action)
+    # Prompt user for the passcode
+    passcode = input("Enter your Okta Verify code: ")
+    payload_dict['passcode'] = passcode
+    # POST MFA login and return response 
+    mfa_response = session.post(idpmfaformsubmiturl, headers=headers_dict,
+                           data=payload_dict, cookies=cookie_dict, verify=True)
+    # Once MFA login is successful, call the login url while providing the sid
+    login_url = password_login_response.history[1].url
+    cookie_response = okta_cookie_login(mfa_response.cookies['sid'],
+                                        login_url) 
+    return cookie_response
 
 def write_sid_file(sid_file,sid):
     """Writes a given sid to a file. Returns nothing"""
@@ -197,7 +236,7 @@ def get_user_creds():
     # Otherwise just ask the user
     else:
         print("Username: ")
-        username = raw_input()
+        username = input()
     # Set prompt to include the user name, since username could be set
     # via OKTA_USERNAME env and user might not remember.
     passwd_prompt = "Password for {}: ".format(username)
