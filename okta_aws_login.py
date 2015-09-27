@@ -69,18 +69,18 @@ def okta_password_login(username,password,idp_entry_url):
     # Parse the response and extract all the necessary values
     # in order to build a dictionary of all of the form values the IdP expects
     formsoup = BeautifulSoup(formresponse.text, "html.parser")
-    payload = {}
+    payload_dict = {}
     for inputtag in formsoup.find_all(re.compile('(INPUT|input)')):
         name = inputtag.get('name','')
         value = inputtag.get('value','')
         if "user" in name.lower():
-            payload[name] = username
+            payload_dict[name] = username
         elif "pass" in name.lower():
-            payload[name] = password
+            payload_dict[name] = password
         else:
             #Simply populate the parameter with the existing value
             #(picks up hidden fields in the login form)
-            payload[name] = value
+            payload_dict[name] = value
     # build the idpauthformsubmiturl by combining the scheme and hostname
     # from the entry url with the form action target
     for inputtag in formsoup.find_all(re.compile('(FORM|form)')):
@@ -91,8 +91,8 @@ def okta_password_login(username,password,idp_entry_url):
                                                 netloc=parsedurl.netloc,
                                                 action=action)
     # Performs the submission of the IdP login form with the above post data
-    response = session.post(
-        idpauthformsubmiturl, params=payload, verify=True)
+    response = session.post(idpauthformsubmiturl, data=payload_dict, 
+                            verify=True)
     # Check the response to see if the login was successful or 
     # if MFA login is needed
     if "Sign in failed!" in response.text:
