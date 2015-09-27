@@ -61,7 +61,7 @@ file_root = expanduser("~")
 # credentials under the saml profile.
 aws_config_file = file_root + '/.aws/credentials'
 # idp_entry_url: The initial url that starts the authentication process.
-idp_entry_url = 'https://nimbusscale.okta.com/home/amazon_aws/0oa1zacnfpCCu09Uc0x7/272'
+idp_entry_url = '<OKTA AWS APP Login URL>'
 # cache_sid: Determines if the session id from Okta should be saved to a
 # local file. If enabled allows for new tokens to be retrieved without a
 # login to Okta for the lifetime of the session.
