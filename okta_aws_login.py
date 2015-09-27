@@ -55,8 +55,8 @@ args = parser.parse_args()
 
 def okta_password_login(username,password,idp_entry_url):
     """Parses the idp_entry_url and performs a login with the creds 
-    provided by the user. Returns a dict with the requests.Response object
-    and the Okta sid"""
+    provided by the user. Returns a requests.Response object that ideally
+    contains a SAML assertion"""
     # Initiate session handler
     session = requests.Session()
     # Programmatically get the SAML assertion
@@ -101,11 +101,7 @@ def okta_password_login(username,password,idp_entry_url):
         sys.exit(1)
     elif "Enter your Okta Verify code" in response.text:
         response = okta_verify_mfa_login(response)
-    # construct dict to return
-    response_dict = {}
-    response_dict['response'] = response
-    response_dict['sid'] = response.cookies['sid']
-    return response_dict
+    return response
 
 def okta_verify_mfa_login(password_login_response):
     """ Prompt user for Okta Verify MFA token and construcuts MFA login request
@@ -235,8 +231,7 @@ def get_user_creds():
         username = os.environ.get("OKTA_USERNAME")
     # Otherwise just ask the user
     else:
-        print("Username: ")
-        username = input()
+        username = input("Username: ")
     # Set prompt to include the user name, since username could be set
     # via OKTA_USERNAME env and user might not remember.
     passwd_prompt = "Password for {}: ".format(username)
@@ -286,6 +281,8 @@ def main():
     # sid: Okta Session ID that can be used to login. This is either specified
     # via argument or can be set manually for testing.
     sid = args.sid
+    # assertion: declaring a var to hold the SAML assertion. 
+    assertion = None
     ###
     # if sid cache is enabled, see if a sid file exists, but only if
     # sid has not been specified via argument
@@ -294,34 +291,24 @@ def main():
     # If a sid has been set (either via arg or from file) then attempt
     # login via the sid
     if sid is not None:
-        cookie_response = okta_cookie_login(sid,idp_entry_url)
-        assertion = get_saml_assertion(cookie_response)
-        # if the assertion equals None, then get do a password login
-        if assertion is None:        
-            user_creds = get_user_creds()
-            password_response = okta_password_login(user_creds['username'],
-                                                    user_creds['password'],
-                                                    idp_entry_url)
-            response = password_response['response']
-            assertion = get_saml_assertion(response)
-            # If cache sid enabled write sid to file
-            if cache_sid == True:
-                write_sid_file(sid_cache_file,password_response['sid'])
-    # If no sid, then just do password login
-    else:
-        user_creds = get_user_creds()
-        password_response = okta_password_login(user_creds['username'],
-                                                user_creds['password'],
-                                                idp_entry_url)
-        response = password_response['response']
+        response = okta_cookie_login(sid,idp_entry_url)
         assertion = get_saml_assertion(response)
-        # If cache sid enabled write sid to file
-        if cache_sid == True:
-            write_sid_file(sid_cache_file,password_response['sid'])
-    # Check to see if an assertion is set otherwise exit with error
+    # if the assertion equals None, means there was no sid, the sid expired 
+    # or is otherwise invalid, so do a password login
+    if assertion is None:        
+        user_creds = get_user_creds()
+        response = okta_password_login(user_creds['username'],
+                                       user_creds['password'],
+                                       idp_entry_url)
+        assertion = get_saml_assertion(response)
+    # If the assertion is still none after the password login, then something
+    # is wrong, complain and exit 
     if assertion is None:
         print("No valid SAML assertion retrieved!")
         sys.exit(1)
+    # If cache sid enabled write sid to file
+    if cache_sid == True:
+        write_sid_file(sid_cache_file,response.cookies['sid'])
     # Get arns from the assertion and the AWS creds from STS
     saml_dict = get_arns_from_assertion(assertion) 
     aws_creds = get_sts_token(saml_dict['RoleArn'],
