@@ -61,7 +61,7 @@ file_root = expanduser("~")
 # credentials under the saml profile.
 aws_config_file = file_root + '/.aws/credentials'
 # idp_entry_url: The initial url that starts the authentication process.
-idp_entry_url = 'https://nimbusscale.okta.com/home/amazon_aws/0oa1zacnfpCCu09Uc0x7/272'
+idp_entry_url = '<Okta_AWS_APP_Login_URL>'
 # cache_sid: Determines if the session id from Okta should be saved to a
 # local file. If enabled allows for new tokens to be retrieved without a
 # login to Okta for the lifetime of the session.
@@ -69,6 +69,11 @@ cache_sid = True
 # sid_cache_file: The file where the Okta sid is stored.
 # only used if cache_sid is True.
 sid_cache_file = file_root + '/.okta_sid'
+# cred_profile: Defines which profile is used to store the temp AWS creds.
+# if set to "role" then a new profile will be created matching the roll name 
+# defined within Okta. if set to "default" then the temp creds will be stored
+# in the default profile.
+cred_profile = 'role'
 ###
 
 def get_arns_from_assertion(assertion):
@@ -353,9 +358,16 @@ def main():
     # check if profile arg has been set
     if args.profile is not None:
         profile_name = args.profile
-    # otherwise just set it to the name of the role 
-    else:
+    # else check if profile should be default
+    elif cred_profile == 'default':
+        profile_name = 'default'
+    # otherwise check to see if it should be the name of the role 
+    elif cred_profile == 'role':
         profile_name = saml_dict['RoleArn'].split('/')[1]
+    # if none complain and exit
+    else:
+        print("profile_name not set!")
+        sys.exit()
     write_aws_creds(aws_config_file,
                     profile_name,
                     aws_creds['AccessKeyId'],
