@@ -75,5 +75,5 @@ options.
 
 # Thanks
 Thanks to Quint Van Deman who published [the blog post](http://blogs.aws.amazon.com/security/post/TxU0AVUS9J00FP/How-to-Implement-a-General-Solution-for-Federated-API-CLI-Access-Using-SAML-2-0) "How to Implement a General Solution for Federated 
-API/CLI Access Using SAML 2.0". Without his example code the development of okta_aws_login.py would not been way more difficult.
+API/CLI Access Using SAML 2.0". Without his example code the development of okta_aws_login.py would have been way more difficult.
 
