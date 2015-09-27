@@ -85,9 +85,8 @@ def okta_password_login(username,password,idp_entry_url):
     # from the entry url with the form action target
     for inputtag in formsoup.find_all(re.compile('(FORM|form)')):
         action = inputtag.get('action')
-        if action:
-            parsedurl = urlparse(idp_entry_url)
-            idpauthformsubmiturl = "{scheme}://{netloc}{action}".format(
+    parsedurl = urlparse(idp_entry_url)
+    idpauthformsubmiturl = "{scheme}://{netloc}{action}".format(
                                                 scheme=parsedurl.scheme,
                                                 netloc=parsedurl.netloc,
                                                 action=action)
