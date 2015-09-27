@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import argparse
 import base64
 import configparser
@@ -43,93 +43,126 @@ parser.add_argument(
     help = "If set will print a message about the token that were set"
 )
 
-parser.add_argument(
-    '--sid', '-s',
-    help = "An Okta Session ID to be used for the login. If expired \
-           you will be prompted for username and password" 
-)
-
 args = parser.parse_args()
 
 ##########################################################################
 
-def okta_password_login(username,password,idp_entry_url):
-    """Parses the idp_entry_url and performs a login with the creds 
-    provided by the user. Returns a requests.Response object that ideally
-    contains a SAML assertion"""
+### Variables ###
+# region: The default AWS region that this script will connect
+# to for all API calls
+region = 'us-west-2'
+# output_format: The AWS CLI output format that will be configured in the
+# saml profile (affects subsequent CLI calls)
+output_format = 'json'
+# file_root: Path in which all file interaction will be relative to.
+# Defaults to the users home dir.
+file_root = expanduser("~")
+# aws_config_file: The file where this script will store the temp
+# credentials under the saml profile.
+aws_config_file = file_root + '/.aws/credentials'
+# idp_entry_url: The initial url that starts the authentication process.
+idp_entry_url = 'https://nimbusscale.okta.com/home/amazon_aws/0oa1zacnfpCCu09Uc0x7/272'
+# cache_sid: Determines if the session id from Okta should be saved to a
+# local file. If enabled allows for new tokens to be retrieved without a
+# login to Okta for the lifetime of the session.
+cache_sid = True
+# sid_cache_file: The file where the Okta sid is stored.
+# only used if cache_sid is True.
+sid_cache_file = file_root + '/.okta_sid'
+###
+
+def get_arns_from_assertion(assertion):
+    """Parses a base64 encoded SAML Assertion and extracts the role and 
+    principle ARNs to be used when making a request to STS.
+    Returns a dict with RoleArn, PrincipalArn & SAMLAssertion that can be 
+    used to call assume_role_with_saml"""
+    # Parse the returned assertion and extract the principle and role ARNs
+    root = ET.fromstring(base64.b64decode(assertion))
+    urn = "{urn:oasis:names:tc:SAML:2.0:assertion}"
+    urn_attribute = urn + "Attribute"
+    urn_attributevalue = urn + "AttributeValue"
+    role_url = "https://aws.amazon.com/SAML/Attributes/Role"
+    for saml2attribute in root.iter(urn_attribute):
+        if (saml2attribute.get('Name') == role_url):
+            for saml2attributevalue in saml2attribute.iter(urn_attributevalue):
+                arns = saml2attributevalue.text
+    # Create dict to be used to call assume_role_with_saml
+    arn_dict = {}
+    arn_dict['RoleArn'] = arns.split(',')[1]
+    arn_dict['PrincipalArn'] = arns.split(',')[0]
+    arn_dict['SAMLAssertion'] = assertion
+    return arn_dict
+
+def get_saml_assertion(response):
+    """Parses a requests.Response object that contains a SAML assertion.
+    Returns an base64 encoded SAML Assertion if one is found"""
+   # Decode the requests.Response object and extract the SAML assertion
+    soup = BeautifulSoup(response.text, "html.parser")
+    # Look for the SAMLResponse attribute of the input tag (determined by
+    # analyzing the debug print lines above)
+    for inputtag in soup.find_all('input'):
+        if(inputtag.get('name') == 'SAMLResponse'):
+            return inputtag.get('value')
+
+def get_sid_from_file(sid_cache_file):
+    """ Checks to see if a file exists at the provided path. If so file is read
+    and checked to see if the contents looks to be a valid sid.
+    if so sid is returned"""
+    if os.path.isfile(sid_cache_file) == True:
+        with open(sid_cache_file) as sid_file:
+            sid = sid_file.read()
+            if len(sid) == 25:
+                return sid
+
+def get_sts_token(RoleArn,PrincipalArn,SAMLAssertion):
+    """Use the assertion to get an AWS STS token using Assume Role with SAML
+    returns a Credentials dict with the keys and token"""
+    sts_client = boto3.client('sts')
+    response = sts_client.assume_role_with_saml(RoleArn=RoleArn,
+                                                PrincipalArn=PrincipalArn,
+                                                SAMLAssertion=SAMLAssertion)
+    Credentials = response['Credentials']
+    return Credentials
+
+def get_user_creds():
+    """ Get's creds for Okta login from the user. Retruns user_creds dict"""
+        # Check to see if the username arg has been set, if so use that
+    if args.username is not None:
+        username = args.username
+    # Next check to see if the OKTA_USERNAME env var is set
+    elif os.environ.get("OKTA_USERNAME") is not None:
+        username = os.environ.get("OKTA_USERNAME")
+    # Otherwise just ask the user
+    else:
+        username = input("Username: ")
+    # Set prompt to include the user name, since username could be set
+    # via OKTA_USERNAME env and user might not remember.
+    passwd_prompt = "Password for {}: ".format(username)
+    password = getpass.getpass(prompt=passwd_prompt)
+    if len(password) == 0:
+        print( "Password must be provided")
+        sys.exit(1)
+    # Build dict and return in
+    user_creds = {}
+    user_creds['username'] = username
+    user_creds['password'] = password
+    return user_creds
+
+def okta_cookie_login(sid,idp_entry_url):
+    """Attempts a login using the provided sid cookie value. Returns a
+    requests.Response object. The Response object may or may not be a
+    successful login containing a SAML assertion"""
+    # Create Cookie Dict and add sid value
+    cookie_dict = {}
+    cookie_dict['sid'] = sid
     # Initiate session handler
     session = requests.Session()
-    # Programmatically get the SAML assertion
-    # Opens the initial IdP url and follows all of the HTTP302 redirects, and
-    # gets the resulting login page
-    formresponse = session.get(idp_entry_url, verify=True)
-    # Capture the idpauthformsubmiturl, 
-    # which is the final url after all the 302s
-    idpauthformsubmiturl = formresponse.url
-    # Parse the response and extract all the necessary values
-    # in order to build a dictionary of all of the form values the IdP expects
-    formsoup = BeautifulSoup(formresponse.text, "html.parser")
-    payload_dict = {}
-    for inputtag in formsoup.find_all(re.compile('(INPUT|input)')):
-        name = inputtag.get('name','')
-        value = inputtag.get('value','')
-        if "user" in name.lower():
-            payload_dict[name] = username
-        elif "pass" in name.lower():
-            payload_dict[name] = password
-        else:
-            #Simply populate the parameter with the existing value
-            #(picks up hidden fields in the login form)
-            payload_dict[name] = value
-    # build the idpauthformsubmiturl by combining the scheme and hostname
-    # from the entry url with the form action target
-    for inputtag in formsoup.find_all(re.compile('(FORM|form)')):
-        action = inputtag.get('action')
-    parsedurl = urlparse(idp_entry_url)
-    idpauthformsubmiturl = "{scheme}://{netloc}{action}".format(
-                                                scheme=parsedurl.scheme,
-                                                netloc=parsedurl.netloc,
-                                                action=action)
-    # Performs the submission of the IdP login form with the above post data
-    response = session.post(idpauthformsubmiturl, data=payload_dict, 
-                            verify=True)
-    # Check the response to see if the login was successful or 
-    # if MFA login is needed
-    if "Sign in failed!" in response.text:
-        print("Sign in failed!")
-        sys.exit(1)
-    elif "Okta Verify code" in response.text:
-        response = okta_mfa_login(response,"Okta Verify")
-    elif "Google Authenticator code" in response.text:
-        response = okta_mfa_login(response,"Google Authenticator")
-    elif "text message verification code" in response.text:
-        send_sms_passcode(response)
-        print("Sending passcode via text message")
-        response = okta_mfa_login(response,"text message")
+    # make request to login page with sid cookie
+    response = session.get(idp_entry_url,verify=True,cookies=cookie_dict)
     return response
 
-def send_sms_passcode(password_login_response):
-    """Has Okta send a passcode via SMS so that user can do an MFA login"""
-    session = requests.Session()
-    soup = BeautifulSoup(password_login_response.text, "html.parser")
-    cookie_dict = {}
-    cookie_dict['sid'] = password_login_response.cookies['sid']
-    headers_dict = {}
-    headers_dict['referer'] = password_login_response.url
-    # Look for the _xsrfToken which we need for a header
-    for inputtag in soup.find_all('input'):
-        if(inputtag.get('name') == '_xsrfToken'):
-            xsrfToken = inputtag.get('value')
-    headers_dict['X-Okta-Xsrftoken'] = xsrfToken
-    send_sms_url = "https://{}/auth/sms/send".format(
-                                urlparse(password_login_response.url).netloc)
-    # POST to send_sms_url to have Okta send the SMS
-    session.post(send_sms_url, headers=headers_dict, cookies=cookie_dict, 
-                 verify=True)
-    
-
 def okta_mfa_login(password_login_response,app):
-    """Prompt user for MFA token generated by either Okta Verify 
+    """Prompt user for MFA token generated by either Okta Verify
     or Google Authenticator and construcuts MFA login request
     from entered passcode and details extracted from provided requests.Response
     object. Returns a requests.Response object of the response after login"""
@@ -160,12 +193,12 @@ def okta_mfa_login(password_login_response,app):
     # it's either passcode or code depending on the auth settings
     for inputtag in soup.find_all('input'):
         if (
-            inputtag.get('name') == 'passcode' 
+            inputtag.get('name') == 'passcode'
             or inputtag.get('name') == 'code'
             ):
             codename = inputtag.get('name')
     payload_dict[codename] = passcode
-    # POST MFA login and return response 
+    # POST MFA login and return response
     mfa_response = session.post(idpmfaformsubmiturl, headers=headers_dict,
                            data=payload_dict, cookies=cookie_dict, verify=True)
     # check to see if the passcode was incorrect, if so complain and exit
@@ -175,71 +208,82 @@ def okta_mfa_login(password_login_response,app):
     # Once MFA login is successful, call the login url while providing the sid
     login_url = password_login_response.history[1].url
     cookie_response = okta_cookie_login(mfa_response.cookies['sid'],
-                                        login_url) 
+                                        login_url)
     return cookie_response
 
-def write_sid_file(sid_file,sid):
-    """Writes a given sid to a file. Returns nothing"""
-    sid_cache_file = os.open(sid_file,os.O_WRONLY|os.O_CREAT,mode=0o600)
-    os.write(sid_cache_file,sid.encode())
-    os.close(sid_cache_file)
-
-def okta_cookie_login(sid,idp_entry_url):
-    """Attempts a login using the provided sid cookie value. Returns a 
-    requests.Response object. The Response object may or may not be a 
-    successful login containing a SAML assertion"""
-    # Create Cookie Dict and add sid value
-    cookie_dict = {}
-    cookie_dict['sid'] = sid 
+def okta_password_login(username,password,idp_entry_url):
+    """Parses the idp_entry_url and performs a login with the creds
+    provided by the user. Returns a requests.Response object that ideally
+    contains a SAML assertion"""
     # Initiate session handler
     session = requests.Session()
-    # make request to login page with sid cookie
-    response = session.get(idp_entry_url,verify=True,cookies=cookie_dict)
+    # Programmatically get the SAML assertion
+    # Opens the initial IdP url and follows all of the HTTP302 redirects, and
+    # gets the resulting login page
+    formresponse = session.get(idp_entry_url, verify=True)
+    # Capture the idpauthformsubmiturl,
+    # which is the final url after all the 302s
+    idpauthformsubmiturl = formresponse.url
+    # Parse the response and extract all the necessary values
+    # in order to build a dictionary of all of the form values the IdP expects
+    formsoup = BeautifulSoup(formresponse.text, "html.parser")
+    payload_dict = {}
+    for inputtag in formsoup.find_all(re.compile('(INPUT|input)')):
+        name = inputtag.get('name','')
+        value = inputtag.get('value','')
+        if "user" in name.lower():
+            payload_dict[name] = username
+        elif "pass" in name.lower():
+            payload_dict[name] = password
+        else:
+            #Simply populate the parameter with the existing value
+            #(picks up hidden fields in the login form)
+            payload_dict[name] = value
+    # build the idpauthformsubmiturl by combining the scheme and hostname
+    # from the entry url with the form action target
+    for inputtag in formsoup.find_all(re.compile('(FORM|form)')):
+        action = inputtag.get('action')
+    parsedurl = urlparse(idp_entry_url)
+    idpauthformsubmiturl = "{scheme}://{netloc}{action}".format(
+                                                scheme=parsedurl.scheme,
+                                                netloc=parsedurl.netloc,
+                                                action=action)
+    # Performs the submission of the IdP login form with the above post data
+    response = session.post(idpauthformsubmiturl, data=payload_dict,
+                            verify=True)
+    # Check the response to see if the login was successful or
+    # if MFA login is needed
+    if "Sign in failed!" in response.text:
+        print("Sign in failed!")
+        sys.exit(1)
+    elif "Okta Verify code" in response.text:
+        response = okta_mfa_login(response,"Okta Verify")
+    elif "Google Authenticator code" in response.text:
+        response = okta_mfa_login(response,"Google Authenticator")
+    elif "text message verification code" in response.text:
+        send_sms_passcode(response)
+        print("Sending passcode via text message")
+        response = okta_mfa_login(response,"text message")
     return response
 
-
-def get_saml_assertion(response):
-    """Parses a requests.Response object that contains a SAML assertion.
-    Returns an base64 encoded SAML Assertion if one is found"""
-   # Decode the requests.Response object and extract the SAML assertion
-    soup = BeautifulSoup(response.text, "html.parser")
-    # Look for the SAMLResponse attribute of the input tag (determined by
-    # analyzing the debug print lines above)
+def send_sms_passcode(password_login_response):
+    """Has Okta send a passcode via SMS so that user can do an MFA login"""
+    session = requests.Session()
+    soup = BeautifulSoup(password_login_response.text, "html.parser")
+    cookie_dict = {}
+    cookie_dict['sid'] = password_login_response.cookies['sid']
+    headers_dict = {}
+    headers_dict['referer'] = password_login_response.url
+    # Look for the _xsrfToken which we need for a header
     for inputtag in soup.find_all('input'):
-        if(inputtag.get('name') == 'SAMLResponse'):
-            return inputtag.get('value')
-
-def get_arns_from_assertion(assertion):
-    """Parses a base64 encoded SAML Assertion and extracts the role and 
-    principle ARNs to be used when making a request to STS.
-    Returns a dict with RoleArn, PrincipalArn & SAMLAssertion that can be 
-    used to call assume_role_with_saml"""
-    # Parse the returned assertion and extract the principle and role ARNs
-    root = ET.fromstring(base64.b64decode(assertion))
-    urn = "{urn:oasis:names:tc:SAML:2.0:assertion}"
-    urn_attribute = urn + "Attribute"
-    urn_attributevalue = urn + "AttributeValue"
-    role_url = "https://aws.amazon.com/SAML/Attributes/Role"
-    for saml2attribute in root.iter(urn_attribute):
-        if (saml2attribute.get('Name') == role_url):
-            for saml2attributevalue in saml2attribute.iter(urn_attributevalue):
-                arns = saml2attributevalue.text
-    # Create dict to be used to call assume_role_with_saml
-    arn_dict = {}
-    arn_dict['RoleArn'] = arns.split(',')[1]
-    arn_dict['PrincipalArn'] = arns.split(',')[0]
-    arn_dict['SAMLAssertion'] = assertion
-    return arn_dict
-
-def get_sts_token(RoleArn,PrincipalArn,SAMLAssertion):
-    """Use the assertion to get an AWS STS token using Assume Role with SAML
-    returns a Credentials dict with the keys and token"""
-    sts_client = boto3.client('sts')
-    response = sts_client.assume_role_with_saml(RoleArn=RoleArn,
-                                                PrincipalArn=PrincipalArn,
-                                                SAMLAssertion=SAMLAssertion)
-    Credentials = response['Credentials']
-    return Credentials
+        if(inputtag.get('name') == '_xsrfToken'):
+            xsrfToken = inputtag.get('value')
+    headers_dict['X-Okta-Xsrftoken'] = xsrfToken
+    send_sms_url = "https://{}/auth/sms/send".format(
+                                urlparse(password_login_response.url).netloc)
+    # POST to send_sms_url to have Okta send the SMS
+    session.post(send_sms_url, headers=headers_dict, cookies=cookie_dict,
+                 verify=True)
 
 def write_aws_creds(aws_config_file,profile,access_key,secret_key,token,
                     region,output):
@@ -260,75 +304,19 @@ def write_aws_creds(aws_config_file,profile,access_key,secret_key,token,
     with open(aws_config_file, 'w+') as configfile:
         config.write(configfile)
 
-def get_user_creds():
-    """ Get's creds for Okta login from the user. Retruns user_creds dict"""
-        # Check to see if the username arg has been set, if so use that
-    if args.username is not None:
-        username = args.username
-    # Next check to see if the OKTA_USERNAME env var is set
-    elif os.environ.get("OKTA_USERNAME") is not None:
-        username = os.environ.get("OKTA_USERNAME")
-    # Otherwise just ask the user
-    else:
-        username = input("Username: ")
-    # Set prompt to include the user name, since username could be set
-    # via OKTA_USERNAME env and user might not remember.
-    passwd_prompt = "Password for {}: ".format(username)
-    password = getpass.getpass(prompt=passwd_prompt)
-    if len(password) == 0:
-        print( "Password must be provided")
-        sys.exit(1)
-    # Build dict and return in
-    user_creds = {}
-    user_creds['username'] = username
-    user_creds['password'] = password
-    return user_creds
+def write_sid_file(sid_file,sid):
+    """Writes a given sid to a file. Returns nothing"""
+    sid_cache_file = os.open(sid_file,os.O_WRONLY|os.O_CREAT,mode=0o600)
+    os.write(sid_cache_file,sid.encode())
+    os.close(sid_cache_file)
 
-def get_sid_from_file(sid_cache_file):
-    """ Checks to see if a file exists at the provided path. If so file is read
-    and checked to see if the contents looks to be a valid sid.  
-    if so sid is returned"""
-    if os.path.isfile(sid_cache_file) == True:
-        with open(sid_cache_file) as sid_file:
-            sid = sid_file.read()
-            if len(sid) == 25:
-                return sid
-    
 def main():
-    ### Variables ###
-    # region: The default AWS region that this script will connect
-    # to for all API calls
-    region = 'us-west-2'
-    # output_format: The AWS CLI output format that will be configured in the
-    # saml profile (affects subsequent CLI calls)
-    output_format = 'json'
-    # file_root: Path in which all file interaction will be relative to.
-    # Defaults to the users home dir.
-    file_root = expanduser("~")
-    # aws_config_file: The file where this script will store the temp
-    # credentials under the saml profile.
-    aws_config_file = file_root + '/.aws/credentials'
-    # idp_entry_url: The initial url that starts the authentication process.
-    idp_entry_url = 'https://nimbusscale.okta.com/home/amazon_aws/0oa1zacnfpCCu09Uc0x7/272'
-    # cache_sid: Determines if the session id from Okta should be saved to a
-    # local file. If enabled allows for new tokens to be retrieved without a
-    # login to Okta for the lifetime of the session.
-    cache_sid = True
-    # sid_cache_file: The file where the Okta sid is stored.
-    # only used if cache_sid is True.
-    sid_cache_file = file_root + '/.okta_sid'
-    # sid: Okta Session ID that can be used to login. This is either specified
-    # via argument or can be set manually for testing.
-    sid = args.sid
     # assertion: declaring a var to hold the SAML assertion. 
     assertion = None
-    ###
-    # if sid cache is enabled, see if a sid file exists, but only if
-    # sid has not been specified via argument
-    if sid is None and cache_sid == True:
+    # if sid cache is enabled, see if a sid file exists
+    if cache_sid == True:
         sid = get_sid_from_file(sid_cache_file)
-    # If a sid has been set (either via arg or from file) then attempt
-    # login via the sid
+    # If a sid has been set from file then attempt login via the sid
     if sid is not None:
         response = okta_cookie_login(sid,idp_entry_url)
         assertion = get_saml_assertion(response)
