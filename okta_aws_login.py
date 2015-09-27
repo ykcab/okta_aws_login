@@ -132,6 +132,10 @@ def okta_verify_mfa_login(password_login_response):
     # POST MFA login and return response 
     mfa_response = session.post(idpmfaformsubmiturl, headers=headers_dict,
                            data=payload_dict, cookies=cookie_dict, verify=True)
+    # check to see if the passcode was incorrect, if so complain and exit
+    if "passcode doesn't match our records" in mfa_response.text:
+        print("Incorrect passcode!")
+        sys.exit(1)
     # Once MFA login is successful, call the login url while providing the sid
     login_url = password_login_response.history[1].url
     cookie_response = okta_cookie_login(mfa_response.cookies['sid'],
@@ -295,6 +299,9 @@ def main():
     # if the assertion equals None, means there was no sid, the sid expired 
     # or is otherwise invalid, so do a password login
     if assertion is None:        
+        # If sid file exists, remove it because the contained sid has expired
+        if os.path.isfile(sid_cache_file):
+            os.remove(sid_cache_file)
         user_creds = get_user_creds()
         response = okta_password_login(user_creds['username'],
                                        user_creds['password'],
