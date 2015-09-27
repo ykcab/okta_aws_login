@@ -61,7 +61,7 @@ file_root = expanduser("~")
 # credentials under the saml profile.
 aws_config_file = file_root + '/.aws/credentials'
 # idp_entry_url: The initial url that starts the authentication process.
-idp_entry_url = '<OKTA AWS APP Login URL>'
+idp_entry_url = 'https://nimbusscale.okta.com/home/amazon_aws/0oa1zacnfpCCu09Uc0x7/272'
 # cache_sid: Determines if the session id from Okta should be saved to a
 # local file. If enabled allows for new tokens to be retrieved without a
 # login to Okta for the lifetime of the session.
@@ -288,9 +288,14 @@ def send_sms_passcode(password_login_response):
 def write_aws_creds(aws_config_file,profile,access_key,secret_key,token,
                     region,output):
     """ Writes the AWS STS token into the AWS credential file"""
-    # Read in the existing config file
+    # Check to see if the aws creds path exists, if not create it
+    creds_dir = os.path.dirname(aws_config_file)
+    if os.path.exists(creds_dir) == False:
+       os.makedirs(creds_dir) 
     config = configparser.RawConfigParser()
-    config.read(aws_config_file)
+    # Read in the existing config file if it exists
+    if os.path.isfile(aws_config_file):
+        config.read(aws_config_file)
     # Put the credentials into a saml specific section instead of clobbering
     # the default credentials
     if not config.has_section(profile):
