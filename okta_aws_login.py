@@ -48,33 +48,48 @@ args = parser.parse_args()
 ##########################################################################
 
 ### Variables ###
-# region: The default AWS region that this script will connect
-# to for all API calls
-region = 'us-west-2'
-# output_format: The AWS CLI output format that will be configured in the
-# saml profile (affects subsequent CLI calls)
-output_format = 'json'
 # file_root: Path in which all file interaction will be relative to.
 # Defaults to the users home dir.
 file_root = expanduser("~")
+# okta_aws_login_config_file: The file were the config parameters for the 
+# okta_aws_login tool is stored
+okta_aws_login_config_file = file_root + '/.okta_aws_login_config'
 # aws_config_file: The file where this script will store the temp
 # credentials under the saml profile.
 aws_config_file = file_root + '/.aws/credentials'
-# idp_entry_url: The initial url that starts the authentication process.
-idp_entry_url = '<Okta_AWS_APP_Login_URL>'
-# cache_sid: Determines if the session id from Okta should be saved to a
-# local file. If enabled allows for new tokens to be retrieved without a
-# login to Okta for the lifetime of the session.
-cache_sid = True
 # sid_cache_file: The file where the Okta sid is stored.
 # only used if cache_sid is True.
 sid_cache_file = file_root + '/.okta_sid'
-# cred_profile: Defines which profile is used to store the temp AWS creds.
-# if set to "role" then a new profile will be created matching the roll name 
-# defined within Okta. if set to "default" then the temp creds will be stored
-# in the default profile.
-cred_profile = 'role'
 ###
+
+def update_config_file(config_path):
+    """Prompts user for config details for the okta_aws_login tool. 
+    Either updates exisiting config file or creates new one."""
+    # Prompt user for config details and store in config_dict
+    config_dict = {}
+    print("Enter the IDP Entry URL. This is the EMBED LINK URL found on the "
+            "General tab of the Okta AWS App.")    
+    config_dict['idp_entry_url'] = input("idp_entry_url []: ")
+    print("Enter the default region that will be used by the okta_aws_login "
+            "tool and configured as part of the CLI profile.")
+    config_dict['region'] = input("region []: ")
+    print("Enter the default output format that will be configured as part of "
+            "CLI profile")
+    config_dict['output_format'] = input("output_format []: ")
+    print("cache_sid determines if the session id from Okta should be saved "
+            "to a local file. If enabled it allows for new tokens to be "
+            "retrieved without a login to Okta for the lifetime of the "
+            "session. ")
+    config_dict['cache_sid'] = input("cache_sid [Y/n]: ")
+    print("cred_profile defines which profile is used to store the temp AWS "
+            "creds. If set to 'role' then a new profile will be created "
+            "matching the roll name assumed by the user. If set to 'default' "
+            "then the temp creds will be stored in the default profile")
+    config_dict['cred_profile'] = input("cred_profile [ROLE/default]: ")
+    config = configparser.ConfigParser()
+    config['DEFAULT'] = config_dict
+    with open(config_path, 'w') as configfile:
+        config.write(configfile)
 
 def get_arns_from_assertion(assertion):
     """Parses a base64 encoded SAML Assertion and extracts the role and 
