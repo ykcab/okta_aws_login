@@ -69,18 +69,6 @@ aws_config_file = file_root + '/.aws/credentials'
 sid_cache_file = file_root + '/.okta_sid'
 ###
 
-def get_user_input(message,default):
-    """formats message to include default and then prompts user for input 
-    via keyboard with message. Returns user's input or if user doesn't 
-    enter input will return the default."""
-    message_with_default = message + " [{}]: ".format(default)
-    user_input = input(message_with_default)
-    print("")
-    if len(user_input) == 0:
-        return default
-    else:
-        return user_input
-
 def get_arns_from_assertion(assertion):
     """Parses a base64 encoded SAML Assertion and extracts the role and 
     principle ARNs to be used when making a request to STS.
@@ -157,6 +145,18 @@ def get_user_creds():
     user_creds['username'] = username
     user_creds['password'] = password
     return user_creds
+
+def get_user_input(message,default):
+    """formats message to include default and then prompts user for input
+    via keyboard with message. Returns user's input or if user doesn't
+    enter input will return the default."""
+    message_with_default = message + " [{}]: ".format(default)
+    user_input = input(message_with_default)
+    print("")
+    if len(user_input) == 0:
+        return default
+    else:
+        return user_input
 
 def okta_cookie_login(sid,idp_entry_url):
     """Attempts a login using the provided sid cookie value. Returns a
@@ -426,17 +426,30 @@ def write_sid_file(sid_file,sid):
     os.close(sid_cache_file)
 
 def main():
+    # Create/Update config when configure arg set
     if args.configure == True:
         update_config_file(okta_aws_login_config_file)
         sys.exit()
-    # assertion: declaring a var to hold the SAML assertion. 
+    # Check to see if config file exists, if not complain and exit
+    # If config file does exist create config dict from file
+    if os.path.isfile(okta_aws_login_config_file):
+        config = configparser.ConfigParser()
+        config.read(okta_aws_login_config_file)
+        conf_dict = dict(config['DEFAULT'])
+    else:
+        print(".okta_aws_login_config is needed. Use --configure flag to "
+                "generate file.")
+        sys.exit(1)
+    # declaring a var to hold the SAML assertion. 
     assertion = None
     # if sid cache is enabled, see if a sid file exists
-    if cache_sid == True:
+    if conf_dict['cache_sid'] == True:
         sid = get_sid_from_file(sid_cache_file)
+    else:
+        sid = None
     # If a sid has been set from file then attempt login via the sid
     if sid is not None:
-        response = okta_cookie_login(sid,idp_entry_url)
+        response = okta_cookie_login(sid,conf_dict['idp_entry_url'])
         assertion = get_saml_assertion(response)
     # if the assertion equals None, means there was no sid, the sid expired 
     # or is otherwise invalid, so do a password login
@@ -447,7 +460,7 @@ def main():
         user_creds = get_user_creds()
         response = okta_password_login(user_creds['username'],
                                        user_creds['password'],
-                                       idp_entry_url)
+                                       conf_dict['idp_entry_url'])
         assertion = get_saml_assertion(response)
     # If the assertion is still none after the password login, then something
     # is wrong, complain and exit 
@@ -455,7 +468,7 @@ def main():
         print("No valid SAML assertion retrieved!")
         sys.exit(1)
     # If cache sid enabled write sid to file
-    if cache_sid == True:
+    if conf_dict['cache_sid'] == True:
         write_sid_file(sid_cache_file,response.cookies['sid'])
     # Get arns from the assertion and the AWS creds from STS
     saml_dict = get_arns_from_assertion(assertion) 
@@ -467,10 +480,10 @@ def main():
     if args.profile is not None:
         profile_name = args.profile
     # else check if profile should be default
-    elif cred_profile == 'default':
+    elif conf_dict['cred_profile'] == 'default':
         profile_name = 'default'
     # otherwise check to see if it should be the name of the role 
-    elif cred_profile == 'role':
+    elif conf_dict['cred_profile'] == 'role':
         profile_name = saml_dict['RoleArn'].split('/')[1]
     # if none complain and exit
     else:
@@ -481,8 +494,8 @@ def main():
                     aws_creds['AccessKeyId'],
                     aws_creds['SecretAccessKey'],
                     aws_creds['SessionToken'],
-                    region,
-                    output_format)
+                    conf_dict['region'],
+                    conf_dict['output_format'])
 
     # Print message about aws_creds if verbose is set
     if args.verbose == True:
