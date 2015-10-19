@@ -25,16 +25,16 @@ parser = argparse.ArgumentParser(
                   " on a SAML assertion from Okta")
 parser.add_argument(
     '--username', '-u',
-    help = "The username to use when logging into Okta. The username can \
-            also be set via the OKTA_USERNAME env variable. If not provided \
-            you will be prompted to enter a username."
+    help = ("The username to use when logging into Okta. The username can "
+            "also be set via the OKTA_USERNAME env variable. If not provided "
+            "you will be prompted to enter a username.")
 )
 
 parser.add_argument(
     '--profile', '-p',
-    help = "The name of the profile to use when storing the credentials in \
-            the AWS credentials file. If not provided then the name of \
-            the role assumed will be used as the profile name"
+    help = ("The name of the profile to use when storing the credentials in "
+            "the AWS credentials file. If not provided then the name of "
+            "the role assumed will be used as the profile name")
 )
 
 parser.add_argument(
@@ -93,7 +93,6 @@ def get_arns_from_assertion(assertion):
         elif ":saml-provider/":
             arn_dict['PrincipalArn'] = arn
     arn_dict['SAMLAssertion'] = assertion
-    print(arn_dict)
     return arn_dict
 
 def get_saml_assertion(response):
