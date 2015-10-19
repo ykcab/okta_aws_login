@@ -40,8 +40,15 @@ parser.add_argument(
 parser.add_argument(
     '--verbose', '-v',
     action = 'store_true',
-    help = "If set will print a message about the token that were set"
+    help = "If set will print a message about the token that was set"
 )
+
+parser.add_argument(
+    '--configure', '-c',
+    action = 'store_true',
+    help = "If set will prompt user for configuration parameters and then exit"
+)
+
 
 args = parser.parse_args()
 
@@ -62,34 +69,17 @@ aws_config_file = file_root + '/.aws/credentials'
 sid_cache_file = file_root + '/.okta_sid'
 ###
 
-def update_config_file(config_path):
-    """Prompts user for config details for the okta_aws_login tool. 
-    Either updates exisiting config file or creates new one."""
-    # Prompt user for config details and store in config_dict
-    config_dict = {}
-    print("Enter the IDP Entry URL. This is the EMBED LINK URL found on the "
-            "General tab of the Okta AWS App.")    
-    config_dict['idp_entry_url'] = input("idp_entry_url []: ")
-    print("Enter the default region that will be used by the okta_aws_login "
-            "tool and configured as part of the CLI profile.")
-    config_dict['region'] = input("region []: ")
-    print("Enter the default output format that will be configured as part of "
-            "CLI profile")
-    config_dict['output_format'] = input("output_format []: ")
-    print("cache_sid determines if the session id from Okta should be saved "
-            "to a local file. If enabled it allows for new tokens to be "
-            "retrieved without a login to Okta for the lifetime of the "
-            "session. ")
-    config_dict['cache_sid'] = input("cache_sid [Y/n]: ")
-    print("cred_profile defines which profile is used to store the temp AWS "
-            "creds. If set to 'role' then a new profile will be created "
-            "matching the roll name assumed by the user. If set to 'default' "
-            "then the temp creds will be stored in the default profile")
-    config_dict['cred_profile'] = input("cred_profile [ROLE/default]: ")
-    config = configparser.ConfigParser()
-    config['DEFAULT'] = config_dict
-    with open(config_path, 'w') as configfile:
-        config.write(configfile)
+def get_user_input(message,default):
+    """formats message to include default and then prompts user for input 
+    via keyboard with message. Returns user's input or if user doesn't 
+    enter input will return the default."""
+    message_with_default = message + " [{}]: ".format(default)
+    user_input = input(message_with_default)
+    print("")
+    if len(user_input) == 0:
+        return default
+    else:
+        return user_input
 
 def get_arns_from_assertion(assertion):
     """Parses a base64 encoded SAML Assertion and extracts the role and 
@@ -305,6 +295,106 @@ def send_sms_passcode(password_login_response):
     session.post(send_sms_url, headers=headers_dict, cookies=cookie_dict,
                  verify=True)
 
+def update_config_file(okta_aws_login_config_file):
+    """Prompts user for config details for the okta_aws_login tool.
+    Either updates exisiting config file or creates new one."""
+    config = configparser.ConfigParser()
+    # See if a config file already exists.
+    # If so, use current values as defaults
+    if os.path.isfile(okta_aws_login_config_file) == True:
+        config.read(okta_aws_login_config_file)
+        idp_entry_url_default = config['DEFAULT']['idp_entry_url']
+        region_default = config['DEFAULT']['region']
+        output_format_default = config['DEFAULT']['output_format']
+        cache_sid_default = config['DEFAULT']['cache_sid']
+        cred_profile_default = config['DEFAULT']['cred_profile']
+    # otherwise use these values for defaults
+    else:
+        idp_entry_url_default = ""
+        region_default = ""
+        output_format_default = "json"
+        cache_sid_default = "True"
+        cred_profile_default = "role"
+    # Prompt user for config details and store in config_dict
+    config_dict = {}
+    # Get and validate idp_entry_url
+    print("Enter the IDP Entry URL. This is the EMBED LINK URL found on the "
+            "General tab of the Okta AWS App.")
+    idp_entry_url_valid = False
+    while idp_entry_url_valid == False:
+        idp_entry_url =  get_user_input("idp_entry_url",idp_entry_url_default)
+        # Validate that idp_entry_url is a well formed okta URL
+        url_parse_results = urlparse(idp_entry_url)
+        if (url_parse_results.scheme == "https" and
+                                     "okta.com" in idp_entry_url):
+            idp_entry_url_valid = True
+        else:
+            print("idp_entry_url must be HTTPS URL for okta.com domain")
+    config_dict['idp_entry_url'] = idp_entry_url
+    # Get and validate region
+    print("Enter the default region that will be used by the okta_aws_login "
+            "tool and configured as part of the CLI profile.")
+    aws_regions = ["us-east-1","us-west-1","us-west-2","eu-west-1",
+                    "eu-central-1","ap-southeast-1","ap-southeast-2",
+                    "ap-northeast-1","sa-east-1"]
+    region_valid = False
+    while region_valid == False:
+        region = get_user_input("region",region_default)
+        # validate entered region is valid AWS region
+        if region in aws_regions:
+            region_valid = True
+        else:
+            print("region must be valid AWS region: {}".format(aws_regions))
+    config_dict['region'] = region
+    # Get and validate output_format
+    print("Enter the default output format that will be configured as part of "
+            "CLI profile")
+    valid_formats = ["json","text","table"]
+    output_format_valid = False
+    while output_format_valid == False:
+        output_format = get_user_input("output_format",output_format_default)
+        # validate entered region is valid AWS CLI output format
+        if output_format in valid_formats:
+            output_format_valid = True
+        else:
+            print("output format must be a valid format: {}".format(
+                                                            valid_formats))
+    config_dict['output_format'] = output_format
+    # Get and validate cache_sid
+    print("cache_sid determines if the session id from Okta should be saved "
+            "to a local file. If enabled it allows for new tokens to be "
+            "retrieved without a login to Okta for the lifetime of the "
+            "session. Either 'True' or 'False'")
+    cache_sid_valid = False
+    while cache_sid_valid == False:
+        cache_sid = get_user_input("cache_sid",cache_sid_default)
+        cache_sid = cache_sid.lower()
+        # validate if either true or false were entered
+        if cache_sid in ["true","false"]:
+            cache_sid_valid = True
+        else:
+            print("cache_sid must be either true or false")
+    config_dict['cache_sid'] = cache_sid == "true"
+    # Get and validate cred_profile
+    print("cred_profile defines which profile is used to store the temp AWS "
+            "creds. If set to 'role' then a new profile will be created "
+            "matching the roll name assumed by the user. If set to 'default' "
+            "then the temp creds will be stored in the default profile")
+    cred_profile_valid = False
+    while cred_profile_valid == False:
+        cred_profile = get_user_input("cred_profile",cred_profile_default)
+        cred_profile = cred_profile.lower()
+        # validate if either role or default was entered
+        if cred_profile in ["default","role"]:
+            cred_profile_valid = True
+        else:
+            print("cred_profile must be either default or role")
+    config_dict['cred_profile'] = cred_profile
+    # Set default config
+    config['DEFAULT'] = config_dict
+    with open(okta_aws_login_config_file, 'w') as configfile:
+        config.write(configfile)
+
 def write_aws_creds(aws_config_file,profile,access_key,secret_key,token,
                     region,output):
     """ Writes the AWS STS token into the AWS credential file"""
@@ -336,6 +426,9 @@ def write_sid_file(sid_file,sid):
     os.close(sid_cache_file)
 
 def main():
+    if args.configure == True:
+        update_config_file(okta_aws_login_config_file)
+        sys.exit()
     # assertion: declaring a var to hold the SAML assertion. 
     assertion = None
     # if sid cache is enabled, see if a sid file exists
