@@ -83,12 +83,17 @@ def get_arns_from_assertion(assertion):
     for saml2attribute in root.iter(urn_attribute):
         if (saml2attribute.get('Name') == role_url):
             for saml2attributevalue in saml2attribute.iter(urn_attributevalue):
-                arns = saml2attributevalue.text
+                arn_text = saml2attributevalue.text
+    arns = arn_text.split(',')
     # Create dict to be used to call assume_role_with_saml
     arn_dict = {}
-    arn_dict['RoleArn'] = arns.split(',')[1]
-    arn_dict['PrincipalArn'] = arns.split(',')[0]
+    for arn in arns:
+        if ":role/" in arn:
+            arn_dict['RoleArn'] = arn
+        elif ":saml-provider/":
+            arn_dict['PrincipalArn'] = arn
     arn_dict['SAMLAssertion'] = assertion
+    print(arn_dict)
     return arn_dict
 
 def get_saml_assertion(response):
