@@ -21,32 +21,35 @@ from bs4 import BeautifulSoup
 # Args
 
 parser = argparse.ArgumentParser(
-    description = "Gets a STS token to use for aws CLI based"
-                  " on a SAML assertion from Okta")
+    description = "Gets a STS token to use for AWS CLI based "
+                  "on a SAML assertion from Okta")
+
 parser.add_argument(
     '--username', '-u',
-    help = ("The username to use when logging into Okta. The username can "
-            "also be set via the OKTA_USERNAME env variable. If not provided "
-            "you will be prompted to enter a username.")
+    help = "The username to use when logging into Okta. The username can "
+           "also be set via the OKTA_USERNAME env variable. If not provided "
+           "you will be prompted to enter a username."
 )
 
 parser.add_argument(
     '--profile', '-p',
-    help = ("The name of the profile to use when storing the credentials in "
-            "the AWS credentials file. If not provided then the name of "
-            "the role assumed will be used as the profile name")
+    help = "The name of the profile to use when storing the credentials in "
+           "the AWS credentials file. If not provided then the name of "
+           "the role assumed will be used as the profile name."
 )
 
 parser.add_argument(
     '--verbose', '-v',
     action = 'store_true',
-    help = "If set will print a message about the token that was set"
+    help = "If set, will print a message about the AWS CLI profile "
+           "that was created."
 )
 
 parser.add_argument(
     '--configure', '-c',
     action = 'store_true',
-    help = "If set will prompt user for configuration parameters and then exit"
+    help = "If set, will prompt user for configuration parameters "
+            " and then exit."
 )
 
 
@@ -107,7 +110,7 @@ def get_saml_assertion(response):
             return inputtag.get('value')
 
 def get_sid_from_file(sid_cache_file):
-    """ Checks to see if a file exists at the provided path. If so file is read
+    """Checks to see if a file exists at the provided path. If so file is read
     and checked to see if the contents looks to be a valid sid.
     if so sid is returned"""
     if os.path.isfile(sid_cache_file) == True:
@@ -127,8 +130,8 @@ def get_sts_token(RoleArn,PrincipalArn,SAMLAssertion):
     return Credentials
 
 def get_user_creds():
-    """ Get's creds for Okta login from the user. Retruns user_creds dict"""
-        # Check to see if the username arg has been set, if so use that
+    """Get's creds for Okta login from the user. Retruns user_creds dict"""
+    # Check to see if the username arg has been set, if so use that
     if args.username is not None:
         username = args.username
     # Next check to see if the OKTA_USERNAME env var is set
