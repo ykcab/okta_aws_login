@@ -17,7 +17,8 @@ Okta is a leading Identity Provider and is often used by organizations to federa
 Single Sign On access to the AWS console. While using Okta resolves the issue of providing federated access to the 
 AWS console it does not provide an "out-of-the-box" solution for federated access when using AWS's CLI tools.
 
-The okta_aws_login tool will prompt the user for the necessary credentials needed to authenticate with the Okta IdP  and then utilize the SAML assertion generation by Okta to retrieve temporary AWS Access and Secret Keys and an AWS 
+The okta_aws_login tool will prompt the user for the necessary credentials needed to authenticate with the Okta IdP 
+and then utilize the SAML assertion generation by Okta to retrieve temporary AWS Access and Secret Keys and an AWS 
 Session Token. The AWS credentials will then be written to the local AWS credentials file to be utilized by aws cli.
 
 okta_aws_login.py supports both password only and Multi-Factor Authentication (MFA). The following MFA options are 
@@ -38,39 +39,44 @@ okta_aws_login.py requires several third party packages. The required packages c
 file.
 
 # CONFIGURATION
-Configuration for okta_aws_login is done via variables set within the module. There is one variable that must be 
-changed and a few others that you may want to change.
+Before running okta_aws_login you must create a configuration file by running “okta_aws_login.py --configure”. 
+A configuration wizard will prompt you to enter the necessary configuration parameters for the tool to run.
+
+The configuration wizard will ask for the following parameters. 
 
 * idp_entry_url - You must enter the URL for the AWS app within Okta that is configured to provide access to AWS with 
-the desired role.
+the desired role. This is the EMBED LINK URL found on the General tab of the Okta AWS App.
 
-* cred_profile - By default the okta_aws_login tool writes the credentials to a profile within the aws credentials 
-file that matches the name of the AWS role assumed with the credentials. This can be changed from "role" to "default" 
-which will cause the okta_aws_login tool to write the credentials to the default profile. Writing the default profile 
-will often be the desired behavior, it is not the default behavior as it prevents any unexpected overwriting of the 
-default profile credentials.
+* region - This will be AWS region included in the AWS CLI profile created by okta_aws_login.
 
-* region and output_format - These will define the region and output for the profile written to the aws credentials 
-file. They default to "us-west-2" and "json". Change them to suit your needs.
+* output_format - This will be out format included in the AWS CLI profile created by okta_aws_login.
+
+* cache_sid - Determines if the session id from Okta should be saved to a local file. If enabled it allows for new 
+tokens to be retrieved without a login to Okta for the lifetime of the session.
+
+* cred_profile - Defines which profile is used to store the temp AWS creds. If set to 'role' then a new AWS CLI profile
+will be created matching the name of the roll assumed by the user. If set to 'default' then the temp creds will be 
+stored in the default profile.
 
 # USAGE
-The simplest usage is to just call okta_aws_login.py from the command line. You will be prompted for the necessary credentials, including MFA credentials.
+The simplest usage is to just call okta_aws_login.py from the command line. You will be prompted for the necessary 
+credentials, including MFA credentials.
 
     $ okta_aws_login.py
     Username: user@example.com
     Password for user@example.com:
     Enter your Okta Verify code: 123456
 
-Once okta_aws_login.py successfully runs, be default, your Okta session ID is cached and will be used to retrieve 
-future temporary AWS credentials. The temporary AWS credentials will typically expired in 60 minutes, while an Okta
-session will, by default, expire after 120 minutes of inactivity. Simply running to tool again at any time before the 
-Okta session expires will refresh your AWS credentials and extend their life for another 60 minutes. Since the 
-session ID is used for authentication you will not be prompted for credentials by okta_aws_login.py.
+Once okta_aws_login.py successfully runs, if cache_side is True, your Okta session ID will be cached and will be used 
+to retrieve future temporary AWS credentials. The temporary AWS credentials will typically expired in 60 minutes, while
+an Okta session will, by default, expire after 120 minutes of inactivity. Simply running to tool again at any time 
+before the Okta session expires will refresh your AWS credentials and extend their life for another 60 minutes. 
+Since the session ID is used for authentication you will not be prompted for credentials by okta_aws_login.py.
 
 The Okta username can be specified in two other ways, one is via a command line argument using the --username option 
 or by setting the username in the OKTA_USERNAME environment variable.
 
-Additional options exist and others may be added in the future. Running `okta_aws_login.py --help` will show you all the 
+Additional options exist and others may be added in the future. Running `okta_aws_login.py --help` will show you all the
 options.
 
 # Thanks
