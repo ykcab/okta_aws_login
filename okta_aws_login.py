@@ -320,7 +320,7 @@ def update_config_file(okta_aws_login_config_file):
         idp_entry_url_default = ""
         region_default = ""
         output_format_default = "json"
-        cache_sid_default = "True"
+        cache_sid_default = "yes"
         cred_profile_default = "role"
     # Prompt user for config details and store in config_dict
     config_dict = {}
@@ -371,17 +371,21 @@ def update_config_file(okta_aws_login_config_file):
     print("cache_sid determines if the session id from Okta should be saved "
             "to a local file. If enabled it allows for new tokens to be "
             "retrieved without a login to Okta for the lifetime of the "
-            "session. Either 'True' or 'False'")
+            "session. Either 'yes' or 'no'")
     cache_sid_valid = False
     while cache_sid_valid == False:
         cache_sid = get_user_input("cache_sid",cache_sid_default)
         cache_sid = cache_sid.lower()
         # validate if either true or false were entered
-        if cache_sid in ["true","false"]:
+        if cache_sid in ["yes","y"]:
+            cache_sid = "yes"
+            cache_sid_valid = True
+        elif cache_sid in ["no","n"]:
+            cache_sid = "no"
             cache_sid_valid = True
         else:
-            print("cache_sid must be either true or false")
-    config_dict['cache_sid'] = cache_sid == "true"
+            print("cache_sid must be either yes or no")
+    config_dict['cache_sid'] = cache_sid
     # Get and validate cred_profile
     print("cred_profile defines which profile is used to store the temp AWS "
             "creds. If set to 'role' then a new profile will be created "
@@ -450,7 +454,7 @@ def main():
     # declaring a var to hold the SAML assertion. 
     assertion = None
     # if sid cache is enabled, see if a sid file exists
-    if conf_dict['cache_sid'] == True:
+    if conf_dict['cache_sid'] == "yes":
         sid = get_sid_from_file(sid_cache_file)
     else:
         sid = None
@@ -475,7 +479,7 @@ def main():
         print("No valid SAML assertion retrieved!")
         sys.exit(1)
     # If cache sid enabled write sid to file
-    if conf_dict['cache_sid'] == True:
+    if conf_dict['cache_sid'] == "yes":
         write_sid_file(sid_cache_file,response.cookies['sid'])
     # Get arns from the assertion and the AWS creds from STS
     saml_dict = get_arns_from_assertion(assertion) 
