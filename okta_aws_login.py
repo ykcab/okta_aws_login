@@ -385,7 +385,7 @@ def update_config_file(okta_aws_login_config_file):
     # Get and validate cred_profile
     print("cred_profile defines which profile is used to store the temp AWS "
             "creds. If set to 'role' then a new profile will be created "
-            "matching the roll name assumed by the user. If set to 'default' "
+            "matching the role name assumed by the user. If set to 'default' "
             "then the temp creds will be stored in the default profile")
     cred_profile_valid = False
     while cred_profile_valid == False:
