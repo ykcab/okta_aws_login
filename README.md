@@ -49,7 +49,7 @@ The configuration wizard will ask for the following parameters.
 
 * idp_entry_url - You must enter the URL for the AWS app within Okta that is configured to provide access to AWS with 
 the desired role. This is the EMBED LINK URL found on the General tab of the Okta AWS App. Access to this link is only
-available to an Okta user with admin rights. if you are not an admin then you will need have an admin provide you the URL.
+available to an Okta user with admin rights. If you are not an admin then you will need to have an admin provide you the URL.
 
 * region - This will be AWS region included in the AWS CLI profile created by okta_aws_login.
 
