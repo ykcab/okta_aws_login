@@ -83,6 +83,9 @@ or by setting the username in the OKTA_USERNAME environment variable.
 Additional options exist and others may be added in the future. Running `okta_aws_login.py --help` will show you all the
 options.
 
+# Other Resources
+Additional details and examples can be found at this blog post - [AWS User Federation with Okta – Part 3: CLI Access](http://blog.nimbusscale.com/2015/10/20/aws-user-federation-with-okta-part-3-cli-access/).
+
 # Thanks
 Thanks to Quint Van Deman who published [the blog post](http://blogs.aws.amazon.com/security/post/TxU0AVUS9J00FP/How-to-Implement-a-General-Solution-for-Federated-API-CLI-Access-Using-SAML-2-0) "How to Implement a General Solution for Federated 
 API/CLI Access Using SAML 2.0". Without his example code the development of okta_aws_login.py would have been way more difficult.
