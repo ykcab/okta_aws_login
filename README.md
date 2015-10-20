@@ -39,7 +39,10 @@ okta_aws_login.py requires several third party packages. The required packages c
 file.
 
 # CONFIGURATION
-Before running okta_aws_login you must create a configuration file by running “okta_aws_login.py --configure”. 
+Before running okta_aws_login you must create a configuration file by running: 
+    
+    okta_aws_login.py --configure 
+
 A configuration wizard will prompt you to enter the necessary configuration parameters for the tool to run.
 
 The configuration wizard will ask for the following parameters. 
